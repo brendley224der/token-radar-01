@@ -96,6 +96,7 @@ table.board { width: 100%; border-collapse: collapse; background: var(--panel); 
 }
 .badge.watch { background: #3b2d07; color: var(--gold); }
 .badge.early { background: #0e2f2a; color: var(--accent); }
+.badge.off { background: #2d1a3d; color: #c084fc; }
 .up { color: var(--up); } .down { color: var(--down); }
 .chains { color: var(--muted); font-size: 13px; }
 .empty { padding: 28px; text-align: center; color: var(--muted); }

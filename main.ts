@@ -83,6 +83,9 @@ for (const name of shots) {
 writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: TEXT_MAX_BYTES, screenshots: SCREENSHOT_CAPS, dashboard: { max_files: 400, max_bytes: 4_194_304 } }));
 
 process.stdout.write(
-  `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
+  `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.off_watchlist_size} off-watchlist, ${radar.live_size} live set aside)\n` +
+    `token radar: fit log10(mcap) = ${radar.validation.fit.intercept} + ${radar.validation.fit.slope} * log10(TVL) over ${radar.validation.fit.n_comps} comps, residual SD ${radar.validation.fit.residual_sd_dex} dex\n` +
+    `token radar: LOO fitted R2 ${radar.validation.loo.fitted_log_r2} MAE ${radar.validation.loo.fitted_log_mae_dex} dex median APE ${radar.validation.loo.fitted_median_ape}x Spearman ${radar.validation.loo.fitted_spearman} top10 ${radar.validation.loo.fitted_top10}/10` +
+    ` | median baseline R2 ${radar.validation.loo.median_log_r2} median APE ${radar.validation.loo.median_median_ape}x Spearman ${radar.validation.loo.median_spearman} top10 ${radar.validation.loo.median_top10}/10\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dashFiles.length} files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );

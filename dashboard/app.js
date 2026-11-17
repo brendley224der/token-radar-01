@@ -10,8 +10,8 @@
   var app = document.getElementById('board');
   app.setAttribute('aria-busy', 'false');
 
-  var state = { q: '', category: 'all', chain: 'all', watch: false, tab: 'pre', sort: 'implied', dir: -1, selected: null };
-  var sandbox = { scale: 1, growth: DATA.model.growth_weight, floor: DATA.model.maturity_floor };
+  var state = { q: '', category: 'all', chain: 'all', group: 'all', tab: 'pre', sort: 'implied', dir: -1, selected: null };
+  var sandbox = { scale: 1, growth: 1, maturity: 1 };
   var sandboxOn = false;
 
   var usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -34,16 +34,16 @@
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
   // The model in one function, the same arithmetic main.ts runs: the page recomputes a row from
-  // the snapshot figures and checks the number board.json carries, so the page's code and the
-  // board's data are visibly the same arithmetic. The sandbox only changes the three weights.
+  // the fitted comps value and its two tilts, so the page's code and the board's data are visibly
+  // the same arithmetic. The sandbox only changes the three weights.
   function impliedOf(row) {
     var m = DATA.model;
-    var growth = Math.min(m.growth_cap, Math.max(m.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
-    var growthMult = 1 + (growth / 100) * sandbox.growth;
-    var age = row.age_days === null || row.age_days === undefined ? m.unknown_age_days : row.age_days;
-    var maturity = sandbox.floor + (Math.min(Math.max(age, 0), m.maturity_days) / m.maturity_days) * (1 - sandbox.floor);
-    var breadth = row.model.breadth_multiplier;
-    return Math.max(1, Math.round(row.tvl_usd * row.model.category_multiple * growthMult * maturity * breadth * sandbox.scale));
+    var fitted = row.model.fitted_value_usd;
+    var mat = 1 + (row.model.maturity_multiplier - 1) * sandbox.maturity;
+    var gro = 1 + (row.model.growth_multiplier - 1) * sandbox.growth;
+    var ratio = (fitted * mat * gro) / row.tvl_usd;
+    ratio = Math.min(m.ratio_cap, Math.max(m.ratio_floor, ratio));
+    return Math.max(1, Math.round(row.tvl_usd * ratio * sandbox.scale));
   }
 
   function el(tag, attrs) {
@@ -74,7 +74,7 @@
     if (params.get('q')) state.q = params.get('q');
     if (params.get('category')) state.category = params.get('category');
     if (params.get('chain')) state.chain = params.get('chain');
-    if (params.get('watch') === '1') state.watch = true;
+    if (params.get('group')) state.group = params.get('group');
     if (params.get('tab')) state.tab = params.get('tab');
     if (params.get('sort')) state.sort = params.get('sort');
     if (params.get('p')) state.selected = params.get('p');
@@ -84,7 +84,7 @@
     if (state.q) params.set('q', state.q);
     if (state.category !== 'all') params.set('category', state.category);
     if (state.chain !== 'all') params.set('chain', state.chain);
-    if (state.watch) params.set('watch', '1');
+    if (state.group !== 'all') params.set('group', state.group);
     if (state.tab !== 'pre') params.set('tab', state.tab);
     if (state.sort !== 'implied') params.set('sort', state.sort);
     if (state.selected) params.set('p', state.selected);
@@ -107,7 +107,7 @@
     var rows = DATA.rows.map(function (r) {
       return { row: r, value: sandboxOn ? impliedOf(r) : r.implied_value_usd };
     });
-    if (state.watch) rows = rows.filter(function (x) { return x.row.on_watchlist; });
+    if (state.group !== 'all') rows = rows.filter(function (x) { return x.row.board_group === state.group; });
     if (state.category !== 'all') rows = rows.filter(function (x) { return (x.row.category || 'Uncategorized') === state.category; });
     if (state.chain !== 'all') rows = rows.filter(function (x) { return x.row.chains.indexOf(state.chain) >= 0; });
     if (state.q) {
@@ -135,27 +135,28 @@
     return el('header', null,
       el('div', { class: 'eyebrow', text: 'DefiLlama snapshot · ' + DATA.as_of + ' · ' + DATA.total_protocols + ' protocols tracked' }),
       el('h1', null, 'Token Radar', el('span', { class: 'dot', text: '.' })),
-      el('p', { class: 'lede' }, 'Every protocol that ', el('b', { text: 'records no token yet' }), ', ranked by what its launch would be worth — ', el('b', { text: DATA.board_size + ' protocols' }), ', from the ' + DATA.watchlist_size + ' on the watchlist down to the smallest early find. Click any row for its farm plan.'));
+      el('p', { class: 'lede' }, 'Every protocol that ', el('b', { text: 'records no token yet' }), ', ranked by what its launch would be worth — ', el('b', { text: DATA.board_size + ' protocols' }), ': the ' + DATA.watchlist_size + ' on the watchlist, ' + DATA.off_watchlist_size + ' more above the floor the watchlist leaves out, and ' + DATA.early_size + ' early finds below it. Click any row for its farm plan.'));
   }
 
   function stats() {
     var s = el('div', { class: 'stats' });
     s.appendChild(el('div', { class: 'stat' }, el('div', { class: 'v', text: String(DATA.board_size) }), el('div', { class: 'k', text: 'protocols ranked' })));
     s.appendChild(el('div', { class: 'stat' }, el('div', { class: 'v', text: String(DATA.watchlist_size) }), el('div', { class: 'k', text: 'on the watchlist' })));
-    s.appendChild(el('div', { class: 'stat' }, el('div', { class: 'v', text: String(DATA.pre_token_count) }), el('div', { class: 'k', text: 'record no token at all' })));
+    s.appendChild(el('div', { class: 'stat' }, el('div', { class: 'v', text: String(DATA.off_watchlist_size) }), el('div', { class: 'k', text: 'off-watchlist, above the floor' })));
     s.appendChild(el('div', { class: 'stat' }, el('div', { class: 'v gold', text: fmtUsd(DATA.total_implied_usd) }), el('div', { class: 'k', text: 'combined implied value' })));
     return s;
   }
 
   function methodCard() {
+    var v = DATA.validation;
     var card = el('section', { class: 'card' },
       el('h2', { text: 'How the radar values a launch' }),
-      el('p', null, 'Implied value follows from the snapshot alone — TVL, seven-day growth, age with no token, and how many chains it runs on. The category multiple is the market\'s own: the median market-cap-per-TVL of the live-token protocols in that category (at least ' + DATA.model.min_live_for_category + ' of them), or the global median ' + DATA.global_multiple.toFixed(3) + ' when a category has too few. No protocol name is ever special-cased.'),
-      el('div', { class: 'formula', text: 'implied = TVL × category multiple × (1 + growth × 0.5) × maturity × breadth' }),
-      el('p', null, 'Maturity runs 0.6 for a newborn protocol to 1.0 after three years with no token; breadth adds 2% per extra chain, up to ten. The board separates the two worlds: pre-token protocols are ranked by this model, live ones are shown at the market\'s own value.'),
-      el('p', { class: 'note' }, '“Records no token” is what DefiLlama says — not proof a protocol has none. A protocol on this board may still hold a token its record does not carry. The implied value is this radar\'s claim, never a prediction that a token will launch, or when.'));
+      el('p', null, 'Implied value is a fitted comps model, not a median and not a list of names. The program fits log market cap on log TVL over the ' + v.fit.n_comps + ' live-token protocols that already trade — one per ticker, dead tokens left out — and prices each pre-token protocol off that line. The slope is ' + v.fit.slope.toFixed(3) + ', below 1: a dollar of TVL is worth less at a giant protocol than at a small one, so the old median multiple, which priced every TVL dollar the same, overpriced the giants by several times. Two small tilts follow: maturity, ' + DATA.model.maturity_floor + ' for a newborn protocol rising to ' + (DATA.model.maturity_floor + DATA.model.maturity_range).toFixed(2) + ' after three years with no token, and growth, ' + DATA.model.growth_weight + ' of the 7-day TVL change, clamped to ' + DATA.model.growth_floor + '%…+' + DATA.model.growth_cap + '%. The tilts are capped on purpose: they keep the board from being a TVL sort without letting a hot week or an old listing dominate the fitted value.'),
+      el('div', { class: 'formula', text: 'implied = 10^(' + v.fit.intercept.toFixed(3) + ' + ' + v.fit.slope.toFixed(3) + ' × log10(TVL)) × maturity × growth' }),
+      el('p', null, 'The board separates the two worlds: pre-token protocols are ranked by this model, live ones are shown at the market\'s own value. The median-multiple rule is kept as a comparison — the detail view shows what it would have said for each protocol — because a model that cannot be compared cannot be trusted.'),
+      el('p', { class: 'note' }, '“Records no token” is what DefiLlama says — not proof a protocol has none. A protocol on this board may still hold a token its record does not carry, and the ' + DATA.off_watchlist_size + ' off-watchlist rows are the honest edge of that: they clear every rule the snapshot can show, but the snapshot carries no parent-protocol record, so it cannot rule out that one of them is a product of a protocol whose token already trades. The implied value is this radar\'s claim, never a prediction that a token will launch, or when.'));
     var table = el('table', { class: 'mult-table' },
-      el('thead', null, el('tr', null, el('th', { text: 'Category' }), el('th', { class: 'num', text: 'Live examples' }), el('th', { class: 'num', text: 'Multiple' }))));
+      el('thead', null, el('tr', null, el('th', { text: 'Category' }), el('th', { class: 'num', text: 'Live examples' }), el('th', { class: 'num', text: 'Median multiple' }))));
     var body = el('tbody');
     DATA.category_multiples.forEach(function (c) {
       body.appendChild(el('tr', null,
@@ -165,6 +166,40 @@
     });
     table.appendChild(body);
     card.appendChild(table);
+    return card;
+  }
+
+  function validationCard() {
+    var v = DATA.validation;
+    var card = el('section', { class: 'card' },
+      el('h2', { text: 'Does the model hold up? It was tested on the snapshot itself' }),
+      el('p', null, 'The fit is log10(market cap) = ' + v.fit.intercept.toFixed(3) + ' + ' + v.fit.slope.toFixed(3) + ' × log10(TVL), fitted on ' + v.fit.n_comps + ' live-token comps, with a residual spread of ' + v.fit.residual_sd_dex.toFixed(2) + ' dex. Two tests ran on the same snapshot — leave-one-out, and a cohort check that fits on the protocols listed before a date and tests on the ones listed after it — each against the old median-multiple rule on the same protocols.'));
+    function runTable(rows, cols) {
+      var table = el('table', { class: 'mult-table' });
+      var head = el('tr', null, el('th', { text: 'Test' }));
+      cols.forEach(function (c) { head.appendChild(el('th', { class: 'num', text: c })); });
+      table.appendChild(el('thead', null, head));
+      var body = el('tbody');
+      rows.forEach(function (r) {
+        var tr = el('tr', null, el('td', { text: r[0] }));
+        for (var i = 1; i < r.length; i++) tr.appendChild(el('td', { class: 'num', text: r[i] }));
+        body.appendChild(tr);
+      });
+      table.appendChild(body);
+      return table;
+    }
+    var loo = v.loo;
+    card.appendChild(el('p', null, el('b', { text: 'Leave-one-out, ' + loo.n_test + ' comps: ' }), 'refit without each protocol in turn and predict it. The fitted value beats the median rule on every level and ranking number except the top-10 count, where the median takes one more.'));
+    card.appendChild(runTable([
+      ['Fitted comps model', loo.fitted_log_r2.toFixed(2), loo.fitted_log_mae_dex.toFixed(2), '×' + (1 + loo.fitted_median_ape).toFixed(2), loo.fitted_spearman.toFixed(2), loo.fitted_top10 + ' / 10'],
+      ['Median-multiple rule', loo.median_log_r2.toFixed(2), '—', '×' + (1 + loo.median_median_ape).toFixed(2), loo.median_spearman.toFixed(2), loo.median_top10 + ' / 10'],
+    ], ['Log R²', 'Mean |error| (dex)', 'Typical error', 'Rank ρ', 'Top 10']));
+    card.appendChild(el('p', null, el('b', { text: 'Cohort check: ' }), 'does the ranking hold for newer launches? The fitted value outranks the median rule in two of the three cohorts; the newest cohort is the hardest — its launches are priced on more than TVL, so the board\'s ranking is the claim, not its dollar levels.'));
+    var cohortRows = v.cohorts.map(function (c) {
+      return [c.label + ' (n=' + c.n_test + ')', c.fitted_spearman.toFixed(2) + ' vs ' + c.median_spearman.toFixed(2), '×' + (1 + c.fitted_median_ape).toFixed(2) + ' vs ×' + (1 + c.median_median_ape).toFixed(2), c.fitted_top10 + ' vs ' + c.median_top10];
+    });
+    card.appendChild(runTable(cohortRows, ['Rank ρ, fitted vs median', 'Typical error, fitted vs median', 'Top 10, fitted vs median']));
+    card.appendChild(el('p', { class: 'note' }, 'Read the numbers plainly: launch values are uncertain — the typical prediction lands within about twice the truth, and half of comparable launches fall within the plausible range the detail view shows. What the tests show is that a fitted price of size beats pricing every TVL dollar the same, and that the ranking survives being tested on protocols the fit never saw.'));
     return card;
   }
 
@@ -188,12 +223,12 @@
       return wrap;
     }
     grid.appendChild(slider('Value scale', 'scale', 0.5, 2, 0.05, function (v) { return '×' + v.toFixed(2); }));
-    grid.appendChild(slider('Growth weight', 'growth', 0, 1, 0.05, function (v) { return v.toFixed(2); }));
-    grid.appendChild(slider('Maturity floor', 'floor', 0.4, 0.8, 0.05, function (v) { return v.toFixed(2); }));
+    grid.appendChild(slider('Growth tilt', 'growth', 0, 1, 0.05, function (v) { return v.toFixed(2); }));
+    grid.appendChild(slider('Maturity tilt', 'maturity', 0, 1, 0.05, function (v) { return v.toFixed(2); }));
     card.appendChild(grid);
     var reset = el('button', { type: 'button', text: 'Reset to the submitted model' });
     reset.addEventListener('click', function () {
-      sandbox = { scale: 1, growth: DATA.model.growth_weight, floor: DATA.model.maturity_floor };
+      sandbox = { scale: 1, growth: 1, maturity: 1 };
       sandboxOn = false;
       render();
     });
@@ -236,13 +271,14 @@
     });
     chainSel.addEventListener('change', function () { state.chain = chainSel.value; writeHash(); render(); });
     row.appendChild(chainSel);
-    var watchLabel = el('label', { class: 'check' });
-    var watchBox = el('input', { type: 'checkbox' });
-    watchBox.checked = state.watch;
-    watchBox.addEventListener('change', function () { state.watch = watchBox.checked; writeHash(); render(); });
-    watchLabel.appendChild(watchBox);
-    watchLabel.appendChild(document.createTextNode(' Watchlist only'));
-    row.appendChild(watchLabel);
+    var groupSel = el('select', { 'aria-label': 'Filter by board group' });
+    [['all', 'All groups'], ['watchlist', 'Watchlist'], ['early', 'Early finds'], ['off-watchlist', 'Off-watchlist']].forEach(function (g) {
+      var o = el('option', { value: g[0], text: g[1] });
+      if (g[0] === state.group) o.selected = true;
+      groupSel.appendChild(o);
+    });
+    groupSel.addEventListener('change', function () { state.group = groupSel.value; writeHash(); render(); });
+    row.appendChild(groupSel);
     wrap.appendChild(row);
     return wrap;
   }
@@ -256,6 +292,12 @@
       render();
     });
     return th;
+  }
+
+  function groupBadge(r) {
+    if (r.board_group === 'watchlist') return { cls: 'watch', text: 'Watchlist' };
+    if (r.board_group === 'off-watchlist') return { cls: 'off', text: 'Off-watchlist' };
+    return { cls: 'early', text: 'Early find' };
   }
 
   function boardTable() {
@@ -289,7 +331,8 @@
       var nameCell = el('td', { class: 'name' });
       nameCell.appendChild(el('b', { text: r.name }));
       nameCell.appendChild(el('span', { class: 'slug', text: r.slug }));
-      nameCell.appendChild(el('span', { class: 'badge ' + (r.on_watchlist ? 'watch' : 'early'), text: r.on_watchlist ? 'Watchlist' : 'Early find' }));
+      var badge = groupBadge(r);
+      nameCell.appendChild(el('span', { class: 'badge ' + badge.cls, text: badge.text }));
       tr.appendChild(nameCell);
       tr.appendChild(el('td', { text: r.category || '—' }));
       tr.appendChild(el('td', { class: 'chains', text: r.chains.slice(0, 3).join(', ') + (r.chains.length > 3 ? ' +' + (r.chains.length - 3) : '') }));
@@ -336,7 +379,8 @@
     var value = sandboxOn ? impliedOf(r) : r.implied_value_usd;
     var card = el('section', { class: 'card detail' });
     var head = el('header');
-    head.appendChild(el('h2', null, '#' + (sandboxOn ? '—' : r.rank) + ' ' + r.name + ' ', el('span', { class: 'badge ' + (r.on_watchlist ? 'watch' : 'early'), text: r.on_watchlist ? 'Watchlist' : 'Early find' })));
+    var badge = groupBadge(r);
+    head.appendChild(el('h2', null, '#' + (sandboxOn ? '—' : r.rank) + ' ' + r.name + ' ', el('span', { class: 'badge ' + badge.cls, text: badge.text })));
     var close = el('button', { class: 'close', type: 'button', text: 'Close ✕' });
     close.addEventListener('click', function () { state.selected = null; writeHash(); render(); });
     head.appendChild(close);
@@ -353,14 +397,16 @@
     var bt = el('table', { class: 'model-break' });
     var bbody = el('tbody');
     bbody.appendChild(el('tr', null, el('td', { text: 'TVL' }), el('td', { class: 'num', text: fmtUsd(r.tvl_usd) })));
-    bbody.appendChild(el('tr', null, el('td', { text: 'Category multiple (' + (r.category || 'Uncategorized') + ')' }), el('td', { class: 'num', text: '×' + m.category_multiple.toFixed(3) })));
-    bbody.appendChild(el('tr', null, el('td', { text: 'Growth ' + fmtPct(m.growth_pct) + ' over 7 days' }), el('td', { class: 'num', text: '×' + m.growth_multiplier.toFixed(3) })));
+    bbody.appendChild(el('tr', null, el('td', { text: 'Fitted comps value (10^(' + DATA.validation.fit.intercept.toFixed(3) + ' + ' + DATA.validation.fit.slope.toFixed(3) + ' × log10(TVL)))' }), el('td', { class: 'num', text: fmtUsd(m.fitted_value_usd) })));
     bbody.appendChild(el('tr', null, el('td', { text: 'Maturity (' + fmtAge(m.age_days) + ' with no token)' }), el('td', { class: 'num', text: '×' + m.maturity_multiplier.toFixed(3) })));
-    bbody.appendChild(el('tr', null, el('td', { text: 'Breadth (' + r.chains.length + ' chain' + (r.chains.length === 1 ? '' : 's') + ')' }), el('td', { class: 'num', text: '×' + m.breadth_multiplier.toFixed(3) })));
+    bbody.appendChild(el('tr', null, el('td', { text: 'Growth (' + fmtPct(r.change_7d) + ' over 7 days)' }), el('td', { class: 'num', text: '×' + m.growth_multiplier.toFixed(3) })));
+    bbody.appendChild(el('tr', null, el('td', { text: 'Plausible range (half of comparable launches fall inside)' }), el('td', { class: 'num', text: fmtUsd(m.plausible_low_usd) + ' – ' + fmtUsd(m.plausible_high_usd) })));
+    bbody.appendChild(el('tr', null, el('td', { text: 'Median-multiple rule would say' }), el('td', { class: 'num', text: fmtUsd(m.median_value_usd) })));
     bbody.appendChild(el('tr', { class: 'total' }, el('td', { text: 'Implied launch value' }), el('td', { class: 'num', text: fmtUsd(value) })));
     bt.appendChild(bbody);
     card.appendChild(bt);
     card.appendChild(el('h2', { text: 'How to farm it' }));
+    card.appendChild(el('p', { class: 'note', text: 'Farm budget: $' + r.farm.capital_usd + ' of capital and about $' + r.farm.gas_usd + ' of gas, held for ' + r.farm.days + ' days.' }));
     var ol = el('ol', { class: 'farm' });
     r.farm_steps.forEach(function (s) {
       var p = splitStep(s);
@@ -376,7 +422,7 @@
   function footer() {
     return el('footer', null,
       el('p', null, 'Source: ' + DATA.source + '. Snapshot as of ' + DATA.as_of + '; the board is frozen to it, so every run of the program writes the same board.'),
-      el('p', null, 'Model ' + DATA.model_version + ': implied = TVL × category multiple × growth × maturity × breadth. The implied value is this radar\'s claim about what a launch would be worth if the protocol\'s record stayed as it is — not a prediction that a token launches, or when.'),
+      el('p', null, 'Model ' + DATA.model_version + ': implied = 10^(' + DATA.validation.fit.intercept.toFixed(3) + ' + ' + DATA.validation.fit.slope.toFixed(3) + ' × log10(TVL)) × maturity × growth, fitted on ' + DATA.validation.fit.n_comps + ' live-token comps. The implied value is this radar\'s claim about what a launch would be worth if the protocol\'s record stayed as it is — not a prediction that a token launches, or when.'),
       el('p', null, 'Built by an AI agent for make.fun\'s “Build the best token launch radar” bounty.'));
   }
 
@@ -399,6 +445,7 @@
     wrap.id = 'table-wrap';
     app.appendChild(wrap);
     app.appendChild(methodCard());
+    app.appendChild(validationCard());
     app.appendChild(sandboxCard());
     app.appendChild(footer());
   }
